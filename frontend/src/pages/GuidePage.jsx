@@ -21,7 +21,7 @@ function Logo() {
         </svg>
       </div>
       <span className="font-800 text-base" style={{ fontWeight: 800, color: "#0070F3" }}>
-        גפן AI
+        גפן-כספים
       </span>
     </button>
   );
@@ -153,7 +153,7 @@ export default function GuidePage() {
         {/* Page heading */}
         <div className="mb-8 anim-fade-up">
           <h1 className="text-3xl font-900 mb-2" style={{ fontWeight: 900, color: "#0f172a" }}>הדרכה</h1>
-          <p className="text-slate-500 text-sm">מדריך למשתמש — גפן AI</p>
+          <p className="text-slate-500 text-sm">מדריך למשתמש — גפן-כספים</p>
         </div>
 
         {/* Section heading */}

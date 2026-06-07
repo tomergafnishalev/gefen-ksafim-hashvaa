@@ -4,7 +4,7 @@ const SECTIONS = [
   {
     num: "1",
     title: "כללי",
-    body: 'אתר גפן AI פועל לפי עקרונות הנגישות כפי שהוגדרו בתקן הישראלי ת"י 5568 (המבוסס על הנחיות WCAG 2.1 ברמה AA). אנו מחויבים לספק חוויית שימוש שווה לכלל המשתמשים, לרבות אנשים עם מוגבלויות.',
+    body: 'אתר גפן-כספים פועל לפי עקרונות הנגישות כפי שהוגדרו בתקן הישראלי ת"י 5568 (המבוסס על הנחיות WCAG 2.1 ברמה AA). אנו מחויבים לספק חוויית שימוש שווה לכלל המשתמשים, לרבות אנשים עם מוגבלויות.',
   },
   {
     num: "2",
@@ -49,7 +49,7 @@ function Logo() {
         </svg>
       </div>
       <span className="font-800 text-base" style={{ fontWeight: 800, color: "#0070F3" }}>
-        גפן AI
+        גפן-כספים
       </span>
     </button>
   );
@@ -181,21 +181,14 @@ export default function AccessibilityStatementPage() {
                   לכל שאלה, בקשה או דיווח על בעיית נגישות, ניתן לפנות לרכז הנגישות:
                 </p>
                 <p className="text-sm font-600 text-slate-700 mb-1" style={{ fontWeight: 600 }}>
-                  תומר אלון
+                  דניאל שלו
                 </p>
                 <a
-                  href="mailto:geffen360@gmail.com"
+                  href="mailto:Daniel@Gafni.biz"
                   className="text-sm text-blue-600 hover:underline block mb-2"
                 >
-                  geffen360@gmail.com
+                  Daniel@Gafni.biz
                 </a>
-                <p className="text-sm text-slate-600">
-                  או דרך{" "}
-                  <Link to="/contact" className="text-blue-600 hover:underline">
-                    טופס 'צור קשר'
-                  </Link>
-                  {" "}באתר.
-                </p>
               </div>
             </div>
           </div>

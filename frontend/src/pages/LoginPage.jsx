@@ -58,10 +58,9 @@ export default function LoginPage() {
 
           {/* Title */}
           <h1 className="text-center text-2xl font-800 mb-1" style={{ color: "#0070F3", fontWeight: 800 }}>
-            גפן AI
+            גפן-כספים
           </h1>
           <p className="text-center text-sm text-slate-400 mb-8 font-medium">
-            כניסה למערכת בדיקת תקציב
           </p>
 
           {/* Form */}
@@ -144,9 +143,6 @@ export default function LoginPage() {
         </div>
 
         {/* Footer */}
-        <p className="text-center text-xs text-slate-400 mt-6">
-          מערכת חכמה לניהול תקציב הגפן
-        </p>
       </div>
     </div>
   );

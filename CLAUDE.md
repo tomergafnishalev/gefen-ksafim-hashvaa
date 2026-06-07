@@ -289,11 +289,17 @@ Only when the user says something like "עדכן באתר", "deploy", "תפרו�
 5. Only after approval: run the Deployment Steps below
 6. After successful push to `main`: **clear `dev-log.md`** (leave only the heading `# Dev Log`)
 
+### GitHub & Developer Info
+- GitHub username: `tomergafnishalev`
+- Git user email: `tomer.gafni.shalev@gmail.com`
+- Git user name: `Tomer Gafnishalev`
+- Repository: `https://github.com/tomergafnishalev/gefen-ksafim-hashvaa.git`
+
 ### Render Setup
 - Platform: [Render](https://render.com)
 - Render watches the **`main`** branch — pushing to `main` triggers an automatic rebuild.
 - There is no `render.yaml` — configuration is in the Render dashboard.
-- Remote: `https://github.com/Tomer2212/gefen-kesafim.git`
+- Remote: `https://github.com/tomergafnishalev/gefen-ksafim-hashvaa.git`
 
 ### Deployment Steps (in order)
 ```

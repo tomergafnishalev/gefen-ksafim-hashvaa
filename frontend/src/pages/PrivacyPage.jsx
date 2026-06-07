@@ -21,7 +21,7 @@ function Logo() {
         </svg>
       </div>
       <span className="font-800 text-base" style={{ fontWeight: 800, color: "#0070F3" }}>
-        גפן AI
+        גפן-כספים
       </span>
     </button>
   );
