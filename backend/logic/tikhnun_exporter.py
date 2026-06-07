@@ -11,6 +11,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 _BLUE_HDR = PatternFill("solid", fgColor="2D5FA0")
+_NAVY_HDR = PatternFill("solid", fgColor="0C237D")
 _GRAY_ROW = PatternFill("solid", fgColor="E8EDF5")
 _RED_FONT = Font(color="C0392B", name="Arial", bold=True)
 _WHT_BOLD = Font(color="FFFFFF", name="Arial", bold=True)
@@ -208,13 +209,50 @@ def _write_partial(ws, tikhnun: dict):
     c.number_format = _MONEY_FMT; c.alignment = _ALIGN_R; c.font = _NRM_BOLD
 
 
+def _write_yozma_breakdown_excel(ws, breakdown: list, start_row: int):
+    ri = start_row
+    t = ws.cell(ri, 1, "פירוט ספקים שדווחו — לפי יוזמה")
+    t.font = Font(name="Arial", bold=True, size=11)
+    t.alignment = _ALIGN_R
+    ri += 2
+
+    for initiative in breakdown:
+        label = f"{initiative.get('initiative_name', '')} — קוד {initiative.get('code', '')} — מענה {initiative.get('plan_number', '')}"
+        for ci in range(1, 5):
+            ws.cell(ri, ci).fill = _NAVY_HDR
+        c = ws.cell(ri, 1, label)
+        c.font = Font(name="Arial", bold=True, color="FFFFFF")
+        c.alignment = _ALIGN_R
+        c = ws.cell(ri, 4, _fmt_num(initiative.get("total_amount")))
+        c.font = Font(name="Arial", bold=True, color="FFFFFF")
+        c.number_format = _MONEY_FMT
+        c.alignment = _ALIGN_R
+        ri += 1
+
+        for ti, supplier in enumerate(initiative.get("suppliers", [])):
+            bg = "FFFFFF" if ti % 2 == 0 else "E8EDF5"
+            for ci in range(1, 5):
+                ws.cell(ri, ci).fill = PatternFill("solid", fgColor=bg)
+            sup_label = f"{supplier.get('supplier_name', '')} ({supplier.get('supplier_number', '')})"
+            ws.cell(ri, 1, sup_label).alignment = _ALIGN_R
+            c = ws.cell(ri, 4, _fmt_num(supplier.get("total_amount")))
+            c.number_format = _MONEY_FMT
+            c.alignment = _ALIGN_R
+            ri += 1
+
+        ri += 1
+
+
 def _write_yozma(ws, tikhnun: dict, yozma_key: str):
     yozma = tikhnun.get(yozma_key, tikhnun.get("yozma_03", {}))
+    breakdown = tikhnun.get("yozma_breakdown", [])
 
     ws.column_dimensions["A"].width = 32
-    ws.column_dimensions["B"].width = 18
-    ws.column_dimensions["C"].width = 18
+    ws.column_dimensions["B"].width = 14
+    ws.column_dimensions["C"].width = 22
     ws.column_dimensions["D"].width = 22
+    if breakdown:
+        ws.column_dimensions["A"].width = 40
 
     title = ws.cell(1, 1, "יוזמות וצרכים ייחודיים")
     title.font = Font(name="Arial", bold=True, size=12)
@@ -241,6 +279,7 @@ def _write_yozma(ws, tikhnun: dict, yozma_key: str):
     for ci, h in enumerate(["סעיף", "תקרה", "בתכנון", "הפרש שניתן לתכנון"], 1):
         _hdr(ws, 7, ci, h)
 
+    last_row = 7
     for ri, item in enumerate(yozma.get("detail", []), 8):
         ws.cell(ri, 1, item.get("label", "")).alignment = _ALIGN_R
         c = ws.cell(ri, 2, _fmt_num(item.get("cap"))); c.number_format = _MONEY_FMT; c.alignment = _ALIGN_R
@@ -249,6 +288,10 @@ def _write_yozma(ws, tikhnun: dict, yozma_key: str):
         c = ws.cell(ri, 4, _fmt_num(h_val)); c.number_format = _MONEY_FMT; c.alignment = _ALIGN_R
         if h_val < 0:
             c.font = _RED_FONT
+        last_row = ri
+
+    if breakdown:
+        _write_yozma_breakdown_excel(ws, breakdown, last_row + 3)
 
 
 # ---------------------------------------------------------------------------
@@ -405,6 +448,40 @@ def build_tikhnun_section_story(tikhnun: dict, section: str, multiplier: str = "
         tbl2 = Table(_rev(data), colWidths=list(reversed(col_widths)))
         tbl2.setStyle(_tbl_style(4, len(data)))
         story.append(tbl2)
+
+        breakdown = tikhnun.get("yozma_breakdown", [])
+        if breakdown:
+            from reportlab.lib.styles import ParagraphStyle as PS
+            from reportlab.lib import colors as rl_colors
+            story.append(Spacer(1, 0.6*cm))
+            style_bd_title = PS("bd_title", fontName=font_bold, fontSize=11, alignment=1)
+            style_init_hdr = PS("bd_init", fontName=font_bold, fontSize=9,
+                                textColor=rl_colors.white, backColor=rl_colors.HexColor("#0C237D"),
+                                alignment=2, leftPadding=4, rightPadding=4, topPadding=3, bottomPadding=3)
+            style_body = PS("bd_body", fontName=font_name, fontSize=8, alignment=2)
+            story.append(Paragraph(rtl("פירוט ספקים שדווחו — לפי יוזמה"), style_bd_title))
+            story.append(Spacer(1, 0.3*cm))
+
+            bd_headers = ["שם ספק", "מספר ספק", "סכום"]
+            bd_widths  = [7*cm, 3.5*cm, 2.5*cm]
+
+            for initiative in breakdown:
+                init_label = f"{rtl(initiative.get('initiative_name', ''))} — {rtl('קוד')} {initiative.get('code', '')} — {rtl('מענה')} {initiative.get('plan_number', '')} | {rtl('סה\"כ')}: {fmt_money(initiative.get('total_amount'))} ₪"
+                story.append(Paragraph(init_label, style_init_hdr))
+                story.append(Spacer(1, 0.1*cm))
+
+                bd_data = [[rtl(h) for h in bd_headers]]
+                for supplier in initiative.get("suppliers", []):
+                    bd_data.append([
+                        rtl(supplier.get("supplier_name", "")),
+                        str(supplier.get("supplier_number", "")),
+                        fmt_money(supplier.get("total_amount")),
+                    ])
+
+                bd_tbl = Table(_rev(bd_data), colWidths=list(reversed(bd_widths)))
+                bd_tbl.setStyle(_tbl_style(len(bd_headers), len(bd_data)))
+                story.append(bd_tbl)
+                story.append(Spacer(1, 0.25*cm))
 
     return story
 
