@@ -466,7 +466,8 @@ def build_tikhnun_section_story(tikhnun: dict, section: str, multiplier: str = "
             bd_widths  = [7*cm, 3.5*cm, 2.5*cm]
 
             for initiative in breakdown:
-                init_label = f"{rtl(initiative.get('initiative_name', ''))} — {rtl('קוד')} {initiative.get('code', '')} — {rtl('מענה')} {initiative.get('plan_number', '')} | {rtl('סה\"כ')}: {fmt_money(initiative.get('total_amount'))} ₪"
+                _total_label = rtl('סה"כ')
+                init_label = f"{rtl(initiative.get('initiative_name', ''))} — {rtl('קוד')} {initiative.get('code', '')} — {rtl('מענה')} {initiative.get('plan_number', '')} | {_total_label}: {fmt_money(initiative.get('total_amount'))} ₪"
                 story.append(Paragraph(init_label, style_init_hdr))
                 story.append(Spacer(1, 0.1*cm))
 
