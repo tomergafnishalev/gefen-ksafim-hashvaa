@@ -1,0 +1,17 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+node_modules/
+frontend/dist/
+*.xlsx
+*.xls
+runs/
+skills-lock.json
+.agents/
+*.png
+backend/result_debug.json
+.claude/
+

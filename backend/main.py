@@ -1,0 +1,39 @@
+import logging
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).parent.parent / ".env")
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from routers.auth_router import router as auth_router
+from routers.analyze_router import router as analyze_router
+from routers.contact_router import router as contact_router
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+
+app = FastAPI(title="Gefen Reconciliation API")
+
+_allowed = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173")
+_origins = [o.strip() for o in _allowed.split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(auth_router, prefix="/auth")
+app.include_router(analyze_router, prefix="/analyze")
+app.include_router(contact_router, prefix="/contact")
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
