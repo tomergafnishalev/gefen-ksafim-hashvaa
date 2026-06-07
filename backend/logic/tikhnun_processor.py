@@ -4,6 +4,8 @@ Reads a 2-sheet budget planning file ("הכל" + "פירוט המענים") and 
 cross-references with a Gefen doch (execution report) to produce analysis data.
 """
 
+import re
+import datetime
 import openpyxl
 from collections import defaultdict
 
@@ -58,6 +60,23 @@ def _extract_plan_num(name):
     if left.isdigit():
         return left
     return ""
+
+
+def _fmt_date(val) -> str:
+    if val is None:
+        return ""
+    if isinstance(val, (datetime.datetime, datetime.date)):
+        return val.strftime("%d/%m/%Y")
+    s = str(val).strip()
+    if not s or s in ("nan", "None"):
+        return ""
+    if re.match(r"^\d{1,2}/\d{1,2}/\d{4}$", s):
+        d, m, y = s.split("/")
+        return f"{int(d):02d}/{int(m):02d}/{y}"
+    if re.match(r"^\d{4}-\d{2}-\d{2}", s):
+        y, m, d = s[:10].split("-")
+        return f"{int(d):02d}/{int(m):02d}/{y}"
+    return s
 
 
 def _plan_key_perut(r):
@@ -342,12 +361,82 @@ def cross_reference_doch(tikhnun_data, doch_filepath):
     partial_rows.sort(key=lambda x: (round(x["pct"], 4), -x["tikhnun"]))
     sum_hefresh_partial = sum(x["hefresh"] for x in partial_rows)
 
+    # ── Yozma breakdown: per-initiative, per-supplier detail ─────────────────
+    yozma_codes_set = set(tikhnun_data["yozma_codes"].keys())
+
+    # initiative name lookup: (plan_number, code) → name
+    plan_code_to_name = {}
+    for r in tikhnun_data["plans_with_R"]:
+        pn = str(r[9] or "").strip()
+        cd = str(r[17] or "").strip()
+        nm = str(r[8] or "").strip()
+        if pn and cd:
+            plan_code_to_name[(pn, cd)] = nm
+
+    # group transactions: (plan_num, code) → supplier_num → [transaction]
+    combo_sups: dict = defaultdict(lambda: defaultdict(list))
+    for r in doch_rows[1:]:
+        if str(r[0] or "").strip().startswith("מענה משרדי"):
+            continue
+        cd = str(r[1] or "").strip()
+        if cd not in yozma_codes_set:
+            continue
+        pn = _extract_plan_num(str(r[3] or ""))
+        if not pn:
+            continue
+        sup_raw = str(r[6] or "").strip()
+        sup_m = re.match(r"^\s*(\d+)\s*-\s*", sup_raw)
+        sup_num = sup_m.group(1) if sup_m else sup_raw
+        sup_name = re.sub(r"^\s*\d+\s*-\s*", "", sup_raw).strip()
+        try:
+            amount = int(round(float(str(r[11] or "0").replace(",", "").strip()))) if r[11] else 0
+        except Exception:
+            amount = 0
+        combo_sups[(pn, cd)][sup_num].append({
+            "date": _fmt_date(r[5]),
+            "invoice": str(r[4] or "").strip(),
+            "description": str(r[10] or "").strip(),
+            "amount": amount,
+            "supplier_name": sup_name,
+        })
+
+    yozma_breakdown = []
+    for (pn, cd), sup_dict in combo_sups.items():
+        suppliers = []
+        combo_total = 0.0
+        for sup_num, txns in sup_dict.items():
+            sup_total = sum(t["amount"] for t in txns)
+            combo_total += sup_total
+            suppliers.append({
+                "supplier_number": sup_num,
+                "supplier_name": txns[0]["supplier_name"],
+                "total_amount": int(round(sup_total)),
+                "transactions": [
+                    {"date": t["date"], "invoice": t["invoice"],
+                     "description": t["description"], "amount": t["amount"]}
+                    for t in txns
+                ],
+            })
+        suppliers.sort(key=lambda x: -x["total_amount"])
+        yozma_breakdown.append({
+            "plan_number": pn,
+            "code": cd,
+            "initiative_name": plan_code_to_name.get((pn, cd), ""),
+            "total_amount": int(round(combo_total)),
+            "suppliers": suppliers,
+        })
+    yozma_breakdown.sort(
+        key=lambda x: (int(x["code"]) if x["code"].isdigit() else 0, x["plan_number"])
+    )
+    # ─────────────────────────────────────────────────────────────────────────
+
     tikhnun_data.update({
         "has_doch": True,
         "pct_tanuz": pct_tanuz,
         "nikuy": nikuy,
         "partial_rows": partial_rows,
         "sum_hefresh_partial": sum_hefresh_partial,
+        "yozma_breakdown": yozma_breakdown,
     })
     return tikhnun_data
 
@@ -386,4 +475,5 @@ def build_tikhnun_result(tikhnun_data):
         "sum_hefresh_partial": tikhnun_data.get("sum_hefresh_partial", 0),
         "yozma_03": tikhnun_data["yozma_03"],
         "yozma_04": tikhnun_data["yozma_04"],
+        "yozma_breakdown": tikhnun_data.get("yozma_breakdown", []),
     }

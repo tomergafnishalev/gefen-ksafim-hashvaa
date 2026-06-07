@@ -6,19 +6,6 @@ import { useFocusTrap } from "../hooks/useFocusTrap";
 // Column definitions
 // ---------------------------------------------------------------------------
 
-const TIKKON_CODES   = new Set([48,54,55,58,59,61,62,66,76,87,91,92,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,127,136,137,138,139,140,141,142,148,150,152,154,156,158,160,162,164,165,167,169]);
-const BEINAYIM_CODES = new Set([43,44,45,46,47,49,50,51,52,53,56,57,60,63,64,65,67,68,69,70,71,72,73,74,75,77,78,80,81,83,84,85,88,89,90,126,128,129,130,131,132,133,134,135,147,151,153,155,161,166,168]);
-
-function splitByDivision(rows) {
-  const tikkon = [], beinayim = [];
-  for (const r of rows) {
-    const code = Number(r["קוד דיווח"]);
-    if (TIKKON_CODES.has(code)) tikkon.push(r);
-    else beinayim.push(r);  // BEINAYIM, SHARED, and unknown all go to beinayim
-  }
-  return { tikkon, beinayim };
-}
-
 const CODE_COL_STYLE = { width: "48px", minWidth: "48px", maxWidth: "48px", padding: "12px 6px", textAlign: "center", whiteSpace: "normal", wordBreak: "break-word" };
 
 const UNIFIED_COLS = [
@@ -28,15 +15,6 @@ const UNIFIED_COLS = [
   { key: "תאריך",       label: "תאריך",        noWrap: true },
   { key: "סכום",        label: "סכום פריט"    },
   { key: "תיאור",       label: "תיאור"        },
-];
-
-const REJECTED_COLS = [
-  { key: "קוד דיווח",   label: "קוד",          thStyle: CODE_COL_STYLE, tdStyle: { ...CODE_COL_STYLE, padding: "10px 6px" } },
-  { key: "שם ספק",      label: "שם ספק"       },
-  { key: "מספר אסמכתה", label: "מספר אסמכתא" },
-  { key: "תאריך",       label: "תאריך",        noWrap: true },
-  { key: "סכום",        label: "סכום פריט"    },
-  { key: "סיבת הדחייה", label: "סיבת הדחייה" },
 ];
 
 const STAGE_LABELS = {
@@ -55,20 +33,12 @@ const DIVISION_LABELS = {
 // Tabs configuration
 // ---------------------------------------------------------------------------
 
-const TAB_IDS = ["hashva", "sikar", "rejected", "nopdf", "partial", "yozma", "kvua"];
+const TAB_IDS = ["hashva", "yozma"];
 const TAB_LABELS_MAP = {
-  hashva:   "השוואה גפן-כספים",
-  sikar:    "סקירה",
-  rejected: "אסמכתאות שנדחו",
-  nopdf:    "ללא PDF",
-  partial:  "דיווח חסר",
-  yozma:    "יוזמות וצרכים",
-  kvua:     "תקציב קבוע",
+  hashva: "השוואה גפן-כספים",
+  yozma:  "יוזמות וצרכים",
 };
-// tabs disabled when no tikhnun data
-const TIKHNUN_ONLY_TABS = ["kvua", "partial", "yozma"];
-// tabs disabled when tikhnun-only (no gefen execution data)
-const GEFEN_ONLY_TABS = ["rejected", "nopdf", "partial"];
+const TIKHNUN_ONLY_TABS = ["yozma"];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -221,16 +191,14 @@ function GefenOnlyNotice({ title, index }) {
 // Tab bar
 // ---------------------------------------------------------------------------
 
-function TabBar({ activeTab, hasTikhnun, tikhnunOnly, getTabIssues, onTabClick }) {
+function TabBar({ activeTab, hasTikhnun, getTabIssues, onTabClick }) {
   return (
     <div
       className="flex flex-nowrap gap-0.5"
       style={{ direction: "rtl", borderBottom: "2px solid rgba(226,232,240,0.8)" }}
     >
       {TAB_IDS.map(tab => {
-        const disabled =
-          (TIKHNUN_ONLY_TABS.includes(tab) && !hasTikhnun) ||
-          (GEFEN_ONLY_TABS.includes(tab) && tikhnunOnly);
+        const disabled = TIKHNUN_ONLY_TABS.includes(tab) && !hasTikhnun;
         const isActive = activeTab === tab;
         const hasIssues = !disabled && getTabIssues(tab);
 
@@ -634,68 +602,6 @@ function NoTikhnunNotice() {
   );
 }
 
-function OverviewRow({ label, value, red, bold }) {
-  return (
-    <div className="flex items-center justify-between py-2.5 border-b border-slate-100 last:border-0">
-      <span className="text-sm font-500 text-slate-500" style={{ fontWeight: 500 }}>{label}</span>
-      <span className="text-sm font-700 tabular-nums"
-        style={{ fontWeight: bold ? 700 : 600, color: red ? "#dc2626" : "#1e293b" }}>
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function SikarTab({ tikhnun }) {
-  if (!tikhnun) return <NoTikhnunNotice />;
-  const ov = tikhnun.overview ?? {};
-  const hasDoch = tikhnun.has_doch;
-
-  return (
-    <div className="flex flex-col gap-4">
-      {/* Top row: פרטי מוסד (right) | קו | תקציב (left) */}
-      <div className="glass-card-dark rounded-2xl overflow-hidden">
-        <div className="flex" dir="rtl">
-          <div className="flex-1 px-5 py-4">
-            <h3 className="text-xs font-700 text-slate-500 tracking-wide mb-3" style={{ fontWeight: 700 }}>פרטי מוסד</h3>
-            <InfoGrid rows={[
-              { label: "שם מוסד",  value: tikhnun.school_name },
-              { label: "סמל מוסד", value: tikhnun.school_code },
-              { label: "שלב מוסד", value: tikhnun.school_stage },
-            ]} />
-          </div>
-          <div className="w-px bg-slate-100 self-stretch" />
-          <div className="flex-1 px-5 py-4">
-            <h3 className="text-xs font-700 text-slate-500 tracking-wide mb-3" style={{ fontWeight: 700 }}>תקציב</h3>
-            <InfoGrid rows={[
-              { label: "תקציב גפן",                value: fmtNum(ov.budget) },
-              { label: "סכום שתוכנן",              value: fmtNum(ov.planned) },
-              { label: "אחוז תכנון",               value: fmtPct(ov.budget > 0 ? ov.planned / ov.budget : null, 2) },
-              { label: "תקציב קבוע שנותר לתכנון", value: fmtNum(ov.fixed_gap_abs) },
-              { label: "תקציב גמיש שנותר לתכנון", value: fmtNum(ov.flexible_remaining),
-                highlight: ov.flexible_remaining < 0 },
-            ]} />
-          </div>
-        </div>
-      </div>
-
-      {/* Bottom: דיווח — full width */}
-      {hasDoch && (
-        <SummaryBlock title="דיווח" index={1}>
-          <InfoGrid rows={[
-            { label: "סכום חייב בדיווח",          value: fmtNum(ov.sum_chayav) },
-            { label: "סכום שדווח",                 value: fmtNum(ov.sum_divuach) },
-            { label: "אחוז דיווח (כללי)",          value: fmtPct(ov.pct_divuach, 0) },
-            ...(ov.pct_tanuz != null
-              ? [{ label: "אחוז דיווח למודל תמרוץ", value: fmtPct(ov.pct_tanuz, 2), highlight: true }]
-              : []),
-          ]} />
-        </SummaryBlock>
-      )}
-    </div>
-  );
-}
-
 function KvuaTab({ tikhnun }) {
   if (!tikhnun) return <NoTikhnunNotice />;
   const rows = tikhnun.kvua_rows ?? [];
@@ -850,6 +756,101 @@ function PartialTab({ tikhnun }) {
   );
 }
 
+function YozmaBreakdownCard({ initiative }) {
+  const [openSuppliers, setOpenSuppliers] = useState(new Set());
+
+  const toggleSupplier = (supNum) => {
+    setOpenSuppliers(prev => {
+      const next = new Set(prev);
+      if (next.has(supNum)) next.delete(supNum);
+      else next.add(supNum);
+      return next;
+    });
+  };
+
+  return (
+    <div className="glass-card-dark rounded-2xl overflow-hidden">
+      <div className="px-4 py-3 flex items-center justify-between"
+        style={{ background: "linear-gradient(135deg, #0c237d 0%, #091a60 100%)" }}>
+        <div className="flex flex-col min-w-0 flex-1 ml-3">
+          <span className="text-white text-sm font-700 leading-snug" style={{ fontWeight: 700, wordBreak: "break-word" }}>
+            {initiative.initiative_name || `מענה ${initiative.plan_number}`}
+          </span>
+          <span className="text-blue-200 text-xs mt-0.5">
+            קוד {initiative.code} · מענה {initiative.plan_number}
+          </span>
+        </div>
+        <span className="text-white text-sm font-700 tabular-nums whitespace-nowrap" style={{ fontWeight: 700 }}>
+          {fmtNum(initiative.total_amount)} ₪
+        </span>
+      </div>
+
+      <div className="divide-y divide-slate-100">
+        {initiative.suppliers.map((sup) => (
+          <div key={sup.supplier_number}>
+            <button
+              className="w-full flex items-center justify-between px-4 py-2.5 text-right hover:bg-slate-50 transition-colors"
+              style={{ background: "transparent" }}
+              onClick={() => toggleSupplier(sup.supplier_number)}
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400">{sup.supplier_number}</span>
+                <span className="text-sm text-slate-700">{sup.supplier_name}</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-700 tabular-nums" style={{ fontWeight: 700, color: "#1e293b" }}>
+                  {fmtNum(sup.total_amount)} ₪
+                </span>
+                <span className="text-slate-400 text-xs">{openSuppliers.has(sup.supplier_number) ? "▲" : "▼"}</span>
+              </div>
+            </button>
+            {openSuppliers.has(sup.supplier_number) && (
+              <div className="overflow-x-auto border-t border-slate-100" style={{ background: "rgba(248,250,252,0.7)" }}>
+                <table className="w-full text-xs border-collapse" dir="rtl">
+                  <thead>
+                    <tr style={{ background: "rgba(241,245,249,1)" }}>
+                      {["תאריך", "מספר חשבונית", "תיאור", "סכום"].map(h => (
+                        <th key={h} className="text-right px-3 py-2 text-slate-500 whitespace-nowrap" style={{ fontWeight: 600 }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sup.transactions.map((txn, ti) => (
+                      <tr key={ti} className="border-t border-slate-100">
+                        <td className="px-3 py-2 text-right text-slate-600 whitespace-nowrap">{txn.date}</td>
+                        <td className="px-3 py-2 text-right text-slate-600">{txn.invoice}</td>
+                        <td className="px-3 py-2 text-right text-slate-600">{txn.description}</td>
+                        <td className="px-3 py-2 text-right text-slate-600 tabular-nums whitespace-nowrap">{fmtNum(txn.amount)} ₪</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function YozmaBreakdownSection({ breakdown }) {
+  if (!breakdown || breakdown.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-4 mt-2">
+      <div className="flex items-center gap-3">
+        <h3 className="text-sm font-700 text-slate-700" style={{ fontWeight: 700 }}>פירוט ספקים שדווחו — לפי יוזמה</h3>
+        <span className="text-xs text-slate-400">{breakdown.length} יוזמות</span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "16px" }}>
+        {breakdown.map((initiative) => (
+          <YozmaBreakdownCard key={`${initiative.plan_number}-${initiative.code}`} initiative={initiative} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function YozmaTab({ tikhnun, multiplier, autoSwitch }) {
   if (!tikhnun) return <NoTikhnunNotice />;
   const yozmaKey = multiplier === "04" ? "yozma_04" : "yozma_03";
@@ -906,6 +907,8 @@ function YozmaTab({ tikhnun, multiplier, autoSwitch }) {
           </table>
         </div>
       </div>
+
+      <YozmaBreakdownSection breakdown={tikhnun?.yozma_breakdown} />
     </div>
   );
 }
@@ -1071,30 +1074,17 @@ export default function ResultsView({ result, runId, authHeader, onNewRun }) {
   const availableTabs = TAB_IDS.filter(tab => {
     if (tab === activeTab) return false;
     if (TIKHNUN_ONLY_TABS.includes(tab) && !hasTikhnun) return false;
-    if (GEFEN_ONLY_TABS.includes(tab) && tikhnunOnly) return false;
     return true;
   });
 
   // Compute issues flag for each tab
   const getTabIssues = (tab) => {
-    if (tikhnunOnly) {
-      if (GEFEN_ONLY_TABS.includes(tab)) return false;
-    }
     if (tab === "hashva") {
       const a = (result.rows_finance_not_gefen ?? []).length;
       const b = (result.rows_gefen_not_finance ?? []).length;
       return a + b > 0;
     }
-    if (tab === "rejected") return (result.rows_gefen_rejected ?? []).length > 0;
-    if (tab === "nopdf")    return (result.rows_gefen_no_pdf ?? []).length > 0;
-    if (!hasTikhnun) return false;
-    if (tab === "kvua")    return isDualTikhnun
-      ? !!(tikhnunTikkon?.kvua_has_issues || tikhnunBeinayim?.kvua_has_issues)
-      : !!tikhnun.kvua_has_issues;
-    if (tab === "partial") return isDualTikhnun
-      ? !!(tikhnunTikkon?.partial_has_issues || tikhnunBeinayim?.partial_has_issues)
-      : !!tikhnun.partial_has_issues;
-    if (tab === "yozma") {
+    if (tab === "yozma" && hasTikhnun) {
       if (isDualTikhnun) {
         const yt = yozmaMultiplierTikkon   === "04" ? tikhnunTikkon?.yozma_04   : tikhnunTikkon?.yozma_03;
         const yb = yozmaMultiplierBeinayim === "04" ? tikhnunBeinayim?.yozma_04 : tikhnunBeinayim?.yozma_03;
@@ -1108,7 +1098,6 @@ export default function ResultsView({ result, runId, authHeader, onNewRun }) {
 
   const handleTabClick = (tab) => {
     if (TIKHNUN_ONLY_TABS.includes(tab) && !hasTikhnun) return;
-    if (GEFEN_ONLY_TABS.includes(tab) && tikhnunOnly) return;
     if (tab === "yozma" && hasTikhnun && !yozmaDialogShown) {
       setShowYozmaDialog(true);
       return;
@@ -1168,7 +1157,6 @@ export default function ResultsView({ result, runId, authHeader, onNewRun }) {
       <TabBar
         activeTab={activeTab}
         hasTikhnun={hasTikhnun}
-        tikhnunOnly={tikhnunOnly}
         getTabIssues={getTabIssues}
         onTabClick={handleTabClick}
       />
@@ -1183,206 +1171,6 @@ export default function ResultsView({ result, runId, authHeader, onNewRun }) {
               </div>
             )
             : <HashvaTab result={result} />
-        )}
-        {activeTab === "sikar" && !isDualTikhnun && (() => {
-          const summary = result.summary;
-          const showBedika = !tikhnunOnly && !result.gefen_only && summary;
-          const { division, finance_rows_total, finance_rows_checked, finance_file } = summary ?? {};
-          const filtered = finance_rows_total !== finance_rows_checked;
-          return (
-            <div className="flex flex-col gap-4">
-              {hasTikhnun && <SikarTab tikhnun={tikhnun} />}
-              {showBedika && (
-                <>
-                  <div className="mt-6 mb-1">
-                    <h2 className="text-xs font-700 text-slate-400 tracking-widest uppercase text-center" style={{ fontWeight: 700 }}>פרטי הבדיקה</h2>
-                  </div>
-                  {hasTikhnun && tikhnun?.filename && (
-                    <SummaryBlock title="קבצי תכנון" index={2}>
-                      <div className="px-2">
-                        <InfoGrid rows={[
-                          { label: "שם קובץ", value: tikhnun.filename },
-                          { label: "שלב",     value: tikhnun.school_stage },
-                        ]} />
-                      </div>
-                    </SummaryBlock>
-                  )}
-                  <SummaryBlock title="קבצי דיווח ביצוע" index={3}>
-                    <GefenFilesDetail gefen_files={summary.gefen_files ?? []} gefen_rows={summary.gefen_rows} gefen_merge_note={summary.gefen_merge_note} />
-                  </SummaryBlock>
-                  <SummaryBlock title="קבצים מתוכנת הכספים" index={4}>
-                    <div className="px-2 flex flex-col gap-2">
-                      <InfoGrid rows={[
-                        { label: "שם קובץ",          value: finance_file?.filename },
-                        { label: "סוג תוכנה",         value: finance_file?.software },
-                        { label: "שלב",               value: STAGE_LABELS[division] ?? division },
-                        { label: "אסמכתאות שזוהו",   value: (finance_rows_total ?? 0) + (finance_file?.cancelled_rows ?? 0) },
-                        { label: "אסמכתאות מבוטלות", value: finance_file?.cancelled_rows ?? null },
-                      ]} />
-                      <div className="pt-3 border-t border-slate-100 flex flex-col gap-1">
-                        {filtered && (
-                          <p className="text-xs text-slate-500">
-                            {`מתוך ${finance_rows_total} שורות כספים, ${finance_rows_checked} שייכות לשלב שנבדק.`}
-                          </p>
-                        )}
-                        <p className="text-sm font-700 text-slate-700" style={{ fontWeight: 700 }}>
-                          {`סה"כ ${finance_rows_checked} אסמכתאות ייחודיות`}
-                        </p>
-                      </div>
-                    </div>
-                  </SummaryBlock>
-                  <SummaryBlock title="מסקנה ותהליך הבדיקה" index={5}>
-                    <div className="px-2 flex flex-col gap-2">
-                      <InfoGrid rows={[
-                        { label: "גפן",          value: (summary.gefen_files ?? []).length === 1
-                          ? `הועלה קובץ דיווח ביצוע עבור ${STAGE_LABELS[division] ?? division}`
-                          : `הועלו קבצי דיווח ביצוע עבור ${STAGE_LABELS[division] ?? division}` },
-                        { label: "תוכנת כספים", value: `הועלה קובץ ${finance_file?.software ?? "כספים"} עבור ${filtered ? STAGE_LABELS["both"] : (STAGE_LABELS[division] ?? division)}` },
-                      ]} />
-                      <div className="pt-3 border-t border-slate-100">
-                        <p className="text-sm font-700 text-slate-700" style={{ fontWeight: 700 }}>
-                          {filtered
-                            ? `לכן הבדיקה בוצעה עבור ${STAGE_LABELS[division] ?? division} בלבד.`
-                            : `לכן הבדיקה בוצעה עבור ${STAGE_LABELS[division] ?? division}.`}
-                        </p>
-                      </div>
-                    </div>
-                  </SummaryBlock>
-                </>
-              )}
-            </div>
-          );
-        })()}
-        {activeTab === "sikar" && isDualTikhnun && (() => {
-          const summary = result.summary;
-          const showBedika = !tikhnunOnly && !result.gefen_only && summary;
-          const { division, finance_rows_total, finance_rows_checked, finance_file } = summary ?? {};
-          const filtered = finance_rows_total !== finance_rows_checked;
-          const hasBothTikhnun = !!(tikhnunTikkon && tikhnunBeinayim);
-          return (
-            <div className="flex flex-col gap-24">
-              {tikhnunTikkon && (
-                <DualTikhnunSection label={tikhnunTikkon.school_stage}>
-                  <SikarTab tikhnun={tikhnunTikkon} />
-                </DualTikhnunSection>
-              )}
-              {tikhnunBeinayim && (
-                <DualTikhnunSection label={tikhnunBeinayim.school_stage}>
-                  <SikarTab tikhnun={tikhnunBeinayim} />
-                </DualTikhnunSection>
-              )}
-              {showBedika && (
-                <div className="flex flex-col gap-4">
-                  <div className="mt-2 mb-1">
-                    <h2 className="text-xs font-700 text-slate-400 tracking-widest uppercase text-center" style={{ fontWeight: 700 }}>פרטי הבדיקה</h2>
-                  </div>
-                  {(tikhnunTikkon || tikhnunBeinayim) && (
-                    <SummaryBlock title="קבצי תכנון" index={2}>
-                      {hasBothTikhnun ? (
-                        <div className="flex items-start gap-0">
-                          <div className="flex-1 px-2">
-                            <InfoGrid rows={[
-                              { label: "שם קובץ", value: tikhnunTikkon.filename },
-                              { label: "שלב",     value: tikhnunTikkon.school_stage },
-                            ]} />
-                          </div>
-                          <div className="w-px self-stretch bg-slate-100 mx-3" />
-                          <div className="flex-1 px-2">
-                            <InfoGrid rows={[
-                              { label: "שם קובץ", value: tikhnunBeinayim.filename },
-                              { label: "שלב",     value: tikhnunBeinayim.school_stage },
-                            ]} />
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="px-2">
-                          <InfoGrid rows={[
-                            { label: "שם קובץ", value: (tikhnunTikkon ?? tikhnunBeinayim).filename },
-                            { label: "שלב",     value: (tikhnunTikkon ?? tikhnunBeinayim).school_stage },
-                          ]} />
-                        </div>
-                      )}
-                    </SummaryBlock>
-                  )}
-                  <SummaryBlock title="קבצי דיווח ביצוע" index={3}>
-                    <GefenFilesDetail gefen_files={summary.gefen_files ?? []} gefen_rows={summary.gefen_rows} gefen_merge_note={summary.gefen_merge_note} />
-                  </SummaryBlock>
-                  <SummaryBlock title="קבצים מתוכנת הכספים" index={4}>
-                    <div className="px-2 flex flex-col gap-2">
-                      <InfoGrid rows={[
-                        { label: "שם קובץ",          value: finance_file?.filename },
-                        { label: "סוג תוכנה",         value: finance_file?.software },
-                        { label: "שלב",               value: STAGE_LABELS[division] ?? division },
-                        { label: "אסמכתאות שזוהו",   value: (finance_rows_total ?? 0) + (finance_file?.cancelled_rows ?? 0) },
-                        { label: "אסמכתאות מבוטלות", value: finance_file?.cancelled_rows ?? null },
-                      ]} />
-                      <div className="pt-3 border-t border-slate-100 flex flex-col gap-1">
-                        {filtered && (
-                          <p className="text-xs text-slate-500">
-                            {`מתוך ${finance_rows_total} שורות כספים, ${finance_rows_checked} שייכות לשלב שנבדק.`}
-                          </p>
-                        )}
-                        <p className="text-sm font-700 text-slate-700" style={{ fontWeight: 700 }}>
-                          {`סה"כ ${finance_rows_checked} אסמכתאות ייחודיות`}
-                        </p>
-                      </div>
-                    </div>
-                  </SummaryBlock>
-                  <SummaryBlock title="מסקנה ותהליך הבדיקה" index={5}>
-                    <div className="px-2 flex flex-col gap-2">
-                      <InfoGrid rows={[
-                        { label: "גפן",          value: (summary.gefen_files ?? []).length === 1
-                          ? `הועלה קובץ דיווח ביצוע עבור ${STAGE_LABELS[division] ?? division}`
-                          : `הועלו קבצי דיווח ביצוע עבור ${STAGE_LABELS[division] ?? division}` },
-                        { label: "תוכנת כספים", value: `הועלה קובץ ${finance_file?.software ?? "כספים"} עבור ${filtered ? STAGE_LABELS["both"] : (STAGE_LABELS[division] ?? division)}` },
-                      ]} />
-                      <div className="pt-3 border-t border-slate-100">
-                        <p className="text-sm font-700 text-slate-700" style={{ fontWeight: 700 }}>
-                          {filtered
-                            ? `לכן הבדיקה בוצעה עבור ${STAGE_LABELS[division] ?? division} בלבד.`
-                            : `לכן הבדיקה בוצעה עבור ${STAGE_LABELS[division] ?? division}.`}
-                        </p>
-                      </div>
-                    </div>
-                  </SummaryBlock>
-                </div>
-              )}
-            </div>
-          );
-        })()}
-        {activeTab === "rejected" && !isDualTikhnun && <RejectedTab result={result} />}
-        {activeTab === "rejected" && isDualTikhnun && (() => {
-          const { tikkon, beinayim } = splitByDivision(result.rows_gefen_rejected ?? []);
-          return (
-            <div className="flex flex-col gap-24">
-              {tikhnunTikkon   && <DualTikhnunSection label={tikhnunTikkon.school_stage}><RejectedTab result={result} rows={tikkon} /></DualTikhnunSection>}
-              {tikhnunBeinayim && <DualTikhnunSection label={tikhnunBeinayim.school_stage}><RejectedTab result={result} rows={beinayim} /></DualTikhnunSection>}
-            </div>
-          );
-        })()}
-        {activeTab === "nopdf" && !isDualTikhnun && <NoPdfTab result={result} />}
-        {activeTab === "nopdf" && isDualTikhnun && (() => {
-          const { tikkon, beinayim } = splitByDivision(result.rows_gefen_no_pdf ?? []);
-          return (
-            <div className="flex flex-col gap-24">
-              {tikhnunTikkon   && <DualTikhnunSection label={tikhnunTikkon.school_stage}><NoPdfTab result={result} rows={tikkon} /></DualTikhnunSection>}
-              {tikhnunBeinayim && <DualTikhnunSection label={tikhnunBeinayim.school_stage}><NoPdfTab result={result} rows={beinayim} /></DualTikhnunSection>}
-            </div>
-          );
-        })()}
-        {activeTab === "kvua" && !isDualTikhnun && <KvuaTab tikhnun={hasTikhnun ? tikhnun : null} />}
-        {activeTab === "kvua" && isDualTikhnun && (
-          <div className="flex flex-col gap-24">
-            {tikhnunTikkon   && <DualTikhnunSection label={tikhnunTikkon.school_stage}><KvuaTab tikhnun={tikhnunTikkon} /></DualTikhnunSection>}
-            {tikhnunBeinayim && <DualTikhnunSection label={tikhnunBeinayim.school_stage}><KvuaTab tikhnun={tikhnunBeinayim} /></DualTikhnunSection>}
-          </div>
-        )}
-        {activeTab === "partial" && !isDualTikhnun && <PartialTab tikhnun={hasTikhnun ? tikhnun : null} />}
-        {activeTab === "partial" && isDualTikhnun && (
-          <div className="flex flex-col gap-24">
-            {tikhnunTikkon   && <DualTikhnunSection label={tikhnunTikkon.school_stage}><PartialTab tikhnun={tikhnunTikkon} /></DualTikhnunSection>}
-            {tikhnunBeinayim && <DualTikhnunSection label={tikhnunBeinayim.school_stage}><PartialTab tikhnun={tikhnunBeinayim} /></DualTikhnunSection>}
-          </div>
         )}
         {activeTab === "yozma" && !isDualTikhnun && (
           <YozmaTab tikhnun={hasTikhnun ? tikhnun : null} multiplier={yozmaMultiplier} autoSwitch={yozmaAutoSwitch} />
