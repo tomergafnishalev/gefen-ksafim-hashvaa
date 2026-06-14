@@ -33,12 +33,25 @@ const DIVISION_LABELS = {
 // Tabs configuration
 // ---------------------------------------------------------------------------
 
-const TAB_IDS = ["hashva", "yozma"];
+const TAB_IDS = ["hashva", "yozma", "nihul"];
 const TAB_LABELS_MAP = {
   hashva: "השוואה גפן-כספים",
   yozma:  "יוזמות וצרכים",
+  nihul:  "ניהול ותפעול",
 };
-const TIKHNUN_ONLY_TABS = ["yozma"];
+const TIKHNUN_ONLY_TABS = ["yozma", "nihul"];
+
+const PILL_STYLE = (active) => ({
+  fontWeight: active ? 700 : 500,
+  fontSize: "12px",
+  padding: "4px 14px",
+  borderRadius: "20px",
+  border: `1.5px solid ${active ? "#0070F3" : "#e2e8f0"}`,
+  background: active ? "#0070F3" : "transparent",
+  color: active ? "white" : "#64748b",
+  cursor: "pointer",
+  transition: "all 0.15s",
+});
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -450,6 +463,54 @@ function TabDownloadBar({ activeTab, runId, authHeader, hasTikhnun, tikhnunOnly,
 }
 
 // ---------------------------------------------------------------------------
+// Budget selection dialog (shown before yozma tab when multiple budgets exist)
+// ---------------------------------------------------------------------------
+
+function BudgetSelectionDialog({ budgets, onSelect, onCancel }) {
+  const { ref, handleKeyDown } = useFocusTrap(onCancel);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4"
+      style={{ background: "rgba(15,23,42,0.45)", backdropFilter: "blur(4px)" }}>
+      <div
+        ref={ref}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="budget-modal-title"
+        onKeyDown={handleKeyDown}
+        className="glass-card rounded-3xl p-7 max-w-sm w-full anim-fade-up text-right" dir="rtl">
+        <div className="w-11 h-11 rounded-2xl flex items-center justify-center mb-4" style={{ background: "rgba(0,112,243,0.09)" }}>
+          <svg aria-hidden="true" width="20" height="20" viewBox="0 0 20 20" fill="none">
+            <rect x="3" y="3" width="6" height="6" rx="1.5" stroke="#0070F3" strokeWidth="1.6"/>
+            <rect x="11" y="3" width="6" height="6" rx="1.5" stroke="#0070F3" strokeWidth="1.6"/>
+            <rect x="3" y="11" width="6" height="6" rx="1.5" stroke="#0070F3" strokeWidth="1.6"/>
+            <rect x="11" y="11" width="6" height="6" rx="1.5" stroke="#0070F3" strokeWidth="1.6"/>
+          </svg>
+        </div>
+        <h2 id="budget-modal-title" className="text-base font-800 mb-3" style={{ fontWeight: 800, color: "#0f172a" }}>
+          בחר תקציב לניתוח יוזמות וצרכים
+        </h2>
+        <p className="text-sm text-slate-600 leading-relaxed mb-5">
+          זוהו לבית הספר מספר תקציבים — לאיזה מהם תרצה לבצע את הניתוח?
+        </p>
+        <div className="flex flex-col gap-2">
+          {budgets.map(b => (
+            <button key={b.name} onClick={() => onSelect(b.name)}
+              className="btn-blue py-2.5 text-sm w-full">
+              {b.name}
+            </button>
+          ))}
+          <button onClick={onCancel}
+            className="flex items-center justify-center py-2.5 text-sm w-full rounded-xl transition-all"
+            style={{ fontWeight: 600, border: "1.5px solid #e2e8f0", color: "#64748b" }}>
+            ביטול
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Yozma dialog
 // ---------------------------------------------------------------------------
 
@@ -851,14 +912,22 @@ function YozmaBreakdownSection({ breakdown }) {
   );
 }
 
-function YozmaTab({ tikhnun, multiplier, autoSwitch }) {
+function YozmaTab({ tikhnun, multiplier, autoSwitch, selectedBudgetName }) {
   if (!tikhnun) return <NoTikhnunNotice />;
+
+  const activeBudget = selectedBudgetName
+    ? (tikhnun.budgets ?? []).find(b => b.name === selectedBudgetName) ?? null
+    : null;
+
   const yozmaKey = multiplier === "04" ? "yozma_04" : "yozma_03";
-  const yozma = tikhnun[yozmaKey] ?? tikhnun.yozma_03 ?? {};
+  const yozma = (activeBudget ?? tikhnun)[yozmaKey] ?? (activeBudget ?? tikhnun).yozma_03 ?? {};
   const hefreshTotal = yozma.hefresh ?? 0;
+  const flexibleRemaining = activeBudget?.overview?.flexible_remaining ?? tikhnun.overview?.flexible_remaining;
+  const yozmaBreakdown = activeBudget?.yozma_breakdown ?? tikhnun.yozma_breakdown;
 
   return (
     <div className="flex flex-col gap-4">
+
       {autoSwitch && (
         <div
           className="rounded-xl px-4 py-3 text-sm text-right"
@@ -874,7 +943,7 @@ function YozmaTab({ tikhnun, multiplier, autoSwitch }) {
           { label: "בתכנון",                        value: fmtNum(yozma.betikhnun) },
           { label: "הפרש",                          value: fmtNum(hefreshTotal),
             danger: hefreshTotal < 0, highlight: hefreshTotal >= 0 },
-          { label: "תקציב גמיש פנוי",              value: fmtNum(tikhnun.overview?.flexible_remaining) },
+          { label: "תקציב גמיש פנוי",              value: fmtNum(flexibleRemaining) },
         ]} />
       </SummaryBlock>
 
@@ -908,7 +977,98 @@ function YozmaTab({ tikhnun, multiplier, autoSwitch }) {
         </div>
       </div>
 
-      <YozmaBreakdownSection breakdown={tikhnun?.yozma_breakdown} />
+      <YozmaBreakdownSection breakdown={yozmaBreakdown} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Nihul tab content
+// ---------------------------------------------------------------------------
+
+function NihulSupplierRow({ sup }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <button
+        className="w-full flex items-center justify-between px-4 py-2.5 text-right hover:bg-slate-50 transition-colors"
+        style={{ background: "transparent" }}
+        onClick={() => setOpen(v => !v)}
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-400">{sup.supplier_number}</span>
+          <span className="text-sm text-slate-700">{sup.supplier_name}</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-700 tabular-nums" style={{ fontWeight: 700, color: "#1e293b" }}>
+            {fmtNum(sup.total_amount)} ₪
+          </span>
+          <span className="text-slate-400 text-xs">{open ? "▲" : "▼"}</span>
+        </div>
+      </button>
+      {open && (
+        <div className="overflow-x-auto border-t border-slate-100" style={{ background: "rgba(248,250,252,0.7)" }}>
+          <table className="w-full text-xs border-collapse" dir="rtl">
+            <thead>
+              <tr style={{ background: "rgba(241,245,249,1)" }}>
+                {["תאריך", "מספר חשבונית", "תיאור", "סכום"].map(h => (
+                  <th key={h} className="text-right px-3 py-2 text-slate-500 whitespace-nowrap" style={{ fontWeight: 600 }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {(sup.transactions ?? []).map((txn, ti) => (
+                <tr key={ti} className="border-t border-slate-100">
+                  <td className="px-3 py-2 text-right text-slate-600 whitespace-nowrap">{txn.date}</td>
+                  <td className="px-3 py-2 text-right text-slate-600">{txn.invoice}</td>
+                  <td className="px-3 py-2 text-right text-slate-600">{txn.description}</td>
+                  <td className="px-3 py-2 text-right text-slate-600 tabular-nums whitespace-nowrap">{fmtNum(txn.amount)} ₪</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NihulTab({ tikhnun }) {
+  if (!tikhnun) return <NoTikhnunNotice />;
+
+  const breakdown = tikhnun.nihul_breakdown ?? [];
+
+  if (breakdown.length === 0) {
+    return (
+      <p className="text-center text-slate-500 py-10 text-sm" dir="rtl">
+        טרם דווחו אסמכתאות עבור ניהול ותפעול
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <h2 className="text-center text-black font-bold text-lg" dir="rtl">
+        פירוט ספקים שדווחו - ניהול ותפעול
+      </h2>
+      {breakdown.map((item) => (
+        <div key={item.code} className="glass-card-dark rounded-2xl overflow-hidden">
+          <div className="px-4 py-3 flex items-center justify-between"
+            style={{ background: "linear-gradient(135deg, #0c237d 0%, #091a60 100%)" }}>
+            <span className="text-white text-sm font-700" style={{ fontWeight: 700 }}>
+              קוד {item.code} — {item.initiative_name}
+            </span>
+            <span className="text-white text-sm font-700 tabular-nums" style={{ fontWeight: 700 }}>
+              {fmtNum(item.total_amount)} ₪
+            </span>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {(item.suppliers ?? []).map((sup) => (
+              <NihulSupplierRow key={sup.supplier_number} sup={sup} />
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -1007,7 +1167,6 @@ function HashvaTab({ result }) {
       <ResultTable title={`משויך בגפן, לא קיים ב${finance_file?.software ?? "תוכנת הכספים"}`}
         rows={gefenRows} columns={UNIFIED_COLS} index={2} showSum
         headerGradient="linear-gradient(135deg, #0c237d 0%, #091a60 100%)" />
-
     </div>
   );
 }
@@ -1056,13 +1215,15 @@ export default function ResultsView({ result, runId, authHeader, onNewRun }) {
   const [activeTab, setActiveTab]       = useState("hashva");
   const [yozmaDialogShown, setYozmaDialogShown]             = useState(false);
   const [showYozmaDialog, setShowYozmaDialog]               = useState(false);
+  const [showBudgetDialog,  setShowBudgetDialog]            = useState(false);
+  const [budgetDialogShown, setBudgetDialogShown]           = useState(false);
+  const [selectedBudgetName, setSelectedBudgetName]         = useState(null);
   const [yozmaMultiplier, setYozmaMultiplier]               = useState("03");
   const [yozmaAutoSwitch, setYozmaAutoSwitch]               = useState(false);
   const [yozmaMultiplierTikkon,   setYozmaMultiplierTikkon]   = useState("03");
   const [yozmaAutoSwitchTikkon,   setYozmaAutoSwitchTikkon]   = useState(false);
   const [yozmaMultiplierBeinayim, setYozmaMultiplierBeinayim] = useState("03");
   const [yozmaAutoSwitchBeinayim, setYozmaAutoSwitchBeinayim] = useState(false);
-
   const tikhnun         = result.tikhnun;
   const tikhnunTikkon   = result.tikhnun_tikkon;
   const tikhnunBeinayim = result.tikhnun_beinayim;
@@ -1090,7 +1251,7 @@ export default function ResultsView({ result, runId, authHeader, onNewRun }) {
         const yb = yozmaMultiplierBeinayim === "04" ? tikhnunBeinayim?.yozma_04 : tikhnunBeinayim?.yozma_03;
         return !!(yt?.is_negative || yb?.is_negative);
       }
-      const y = yozmaMultiplier === "04" ? tikhnun.yozma_04 : tikhnun.yozma_03;
+      const y = yozmaMultiplier === "04" ? tikhnun?.yozma_04 : tikhnun?.yozma_03;
       return !!(y?.is_negative);
     }
     return false;
@@ -1099,10 +1260,22 @@ export default function ResultsView({ result, runId, authHeader, onNewRun }) {
   const handleTabClick = (tab) => {
     if (TIKHNUN_ONLY_TABS.includes(tab) && !hasTikhnun) return;
     if (tab === "yozma" && hasTikhnun && !yozmaDialogShown) {
-      setShowYozmaDialog(true);
+      const budgets = tikhnun?.budgets ?? [];
+      if (!isDualTikhnun && budgets.length > 1 && !budgetDialogShown) {
+        setShowBudgetDialog(true);   // step 1: budget selection
+      } else {
+        setShowYozmaDialog(true);    // step 2 (or only step): incentive model
+      }
       return;
     }
     setActiveTab(tab);
+  };
+
+  const handleBudgetSelect = (budgetName) => {
+    setSelectedBudgetName(budgetName);
+    setBudgetDialogShown(true);
+    setShowBudgetDialog(false);
+    setShowYozmaDialog(true);
   };
 
   const handleYozmaAnswer = (answer) => {
@@ -1140,6 +1313,13 @@ export default function ResultsView({ result, runId, authHeader, onNewRun }) {
 
   return (
     <div className="flex flex-col gap-5" dir="rtl">
+      {showBudgetDialog && !isDualTikhnun && tikhnun && (
+        <BudgetSelectionDialog
+          budgets={tikhnun.budgets ?? []}
+          onSelect={handleBudgetSelect}
+          onCancel={() => setShowBudgetDialog(false)}
+        />
+      )}
       {showYozmaDialog && !isDualTikhnun && (
         <YozmaDialog onAnswer={handleYozmaAnswer} onCancel={() => setShowYozmaDialog(false)} />
       )}
@@ -1173,12 +1353,21 @@ export default function ResultsView({ result, runId, authHeader, onNewRun }) {
             : <HashvaTab result={result} />
         )}
         {activeTab === "yozma" && !isDualTikhnun && (
-          <YozmaTab tikhnun={hasTikhnun ? tikhnun : null} multiplier={yozmaMultiplier} autoSwitch={yozmaAutoSwitch} />
+          <YozmaTab tikhnun={hasTikhnun ? tikhnun : null} multiplier={yozmaMultiplier} autoSwitch={yozmaAutoSwitch} selectedBudgetName={selectedBudgetName} />
         )}
         {activeTab === "yozma" && isDualTikhnun && (
           <div className="flex flex-col gap-24">
             {tikhnunTikkon   && <DualTikhnunSection label={tikhnunTikkon.school_stage}><YozmaTab tikhnun={tikhnunTikkon} multiplier={yozmaMultiplierTikkon} autoSwitch={yozmaAutoSwitchTikkon} /></DualTikhnunSection>}
             {tikhnunBeinayim && <DualTikhnunSection label={tikhnunBeinayim.school_stage}><YozmaTab tikhnun={tikhnunBeinayim} multiplier={yozmaMultiplierBeinayim} autoSwitch={yozmaAutoSwitchBeinayim} /></DualTikhnunSection>}
+          </div>
+        )}
+        {activeTab === "nihul" && !isDualTikhnun && (
+          <NihulTab tikhnun={hasTikhnun ? tikhnun : null} />
+        )}
+        {activeTab === "nihul" && isDualTikhnun && (
+          <div className="flex flex-col gap-24">
+            {tikhnunTikkon   && <DualTikhnunSection label={tikhnunTikkon.school_stage}><NihulTab tikhnun={tikhnunTikkon} /></DualTikhnunSection>}
+            {tikhnunBeinayim && <DualTikhnunSection label={tikhnunBeinayim.school_stage}><NihulTab tikhnun={tikhnunBeinayim} /></DualTikhnunSection>}
           </div>
         )}
       </div>

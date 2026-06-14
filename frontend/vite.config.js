@@ -7,9 +7,9 @@ export default defineConfig({
   server: {
     port: 5174,
     proxy: {
-      "/auth": { target: "http://127.0.0.1:8001", changeOrigin: true },
-      "/analyze": { target: "http://127.0.0.1:8001", changeOrigin: true },
-      "/contact/send": { target: "http://127.0.0.1:8001", changeOrigin: true },
+      "/auth": { target: "http://127.0.0.1:8002", changeOrigin: true },
+      "/analyze": { target: "http://127.0.0.1:8002", changeOrigin: true },
+      "/contact/send": { target: "http://127.0.0.1:8002", changeOrigin: true },
     },
   },
 });

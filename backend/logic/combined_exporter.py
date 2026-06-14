@@ -14,13 +14,14 @@ from logic.pdf_exporter import (
 )
 from logic.tikhnun_exporter import (
     _write_kvua,
+    _write_nihul,
     _write_partial,
     _write_sikar,
     _write_yozma,
     build_tikhnun_section_story,
 )
 
-TIKHNUN_TABS = {"sikar", "kvua", "partial", "yozma"}
+TIKHNUN_TABS = {"sikar", "kvua", "partial", "yozma", "nihul"}
 HASHVA_TABS = {"hashva", "rejected", "nopdf"}
 
 _SHEET_NAMES = {
@@ -28,6 +29,7 @@ _SHEET_NAMES = {
     "kvua":    "מימוש תקציב קבוע",
     "partial": "תוכניות עם ביצוע חלקי",
     "yozma":   "יוזמות וצרכים",
+    "nihul":   "ניהול ותפעול",
 }
 
 
@@ -80,7 +82,7 @@ def export_combined_excel(run_data: dict, sections: list, multiplier: str = "03"
 
     if has_tikhnun and tikhnun_sections:
         yozma_key = "yozma_04" if multiplier == "04" else "yozma_03"
-        write_fns = {"sikar": _write_sikar, "kvua": _write_kvua, "partial": _write_partial}
+        write_fns = {"sikar": _write_sikar, "kvua": _write_kvua, "partial": _write_partial, "nihul": _write_nihul}
         for section in tikhnun_sections:
             base_title = _SHEET_NAMES.get(section, section)
             title = base_title

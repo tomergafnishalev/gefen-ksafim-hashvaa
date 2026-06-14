@@ -43,7 +43,7 @@ def _col(ws, idx, width):
 def export_tikhnun_excel(tikhnun: dict, section: str, multiplier: str = "03") -> bytes:
     """
     Export a single tikhnun section to Excel bytes.
-    section: "sikar" | "kvua" | "partial" | "yozma"
+    section: "sikar" | "kvua" | "partial" | "yozma" | "nihul"
     multiplier: "03" | "04" (used only for yozma section)
     """
     wb = openpyxl.Workbook()
@@ -63,6 +63,9 @@ def export_tikhnun_excel(tikhnun: dict, section: str, multiplier: str = "03") ->
         yozma_key = "yozma_04" if multiplier == "04" else "yozma_03"
         _write_yozma(ws, tikhnun, yozma_key)
         ws.title = "יוזמות וצרכים"
+    elif section == "nihul":
+        _write_nihul(ws, tikhnun)
+        ws.title = "ניהול ותפעול"
     else:
         raise ValueError(f"Unknown section: {section}")
 
@@ -294,6 +297,45 @@ def _write_yozma(ws, tikhnun: dict, yozma_key: str):
         _write_yozma_breakdown_excel(ws, breakdown, last_row + 3)
 
 
+def _write_nihul(ws, tikhnun: dict):
+    ws.column_dimensions["A"].width = 34
+    ws.column_dimensions["B"].width = 20
+    ws.column_dimensions["C"].width = 18
+
+    title = ws.cell(1, 1, "ניהול ותפעול - פירוט ספקים")
+    title.font = Font(name="Arial", bold=True, size=12)
+    title.alignment = _ALIGN_R
+
+    breakdown = tikhnun.get("nihul_breakdown", [])
+    if not breakdown:
+        ws.cell(3, 1, "אין נתוני ניהול ותפעול לבדיקה זו").alignment = _ALIGN_R
+        return
+
+    _hdr(ws, 3, 1, "שם ספק")
+    _hdr(ws, 3, 2, "מספר ספק")
+    _hdr(ws, 3, 3, "סכום")
+    ri = 4
+
+    for item in breakdown:
+        for ci in range(1, 4):
+            ws.cell(ri, ci).fill = _GRAY_ROW
+        lc = ws.cell(ri, 1, f"קוד {item['code']} — {item['initiative_name']}")
+        lc.font = _NRM_BOLD
+        lc.alignment = _ALIGN_R
+        tc = ws.cell(ri, 3, _fmt_num(item["total_amount"]))
+        tc.number_format = _MONEY_FMT
+        tc.alignment = _ALIGN_R
+        tc.font = _NRM_BOLD
+        ri += 1
+        for sup in item.get("suppliers", []):
+            ws.cell(ri, 1, sup.get("supplier_name", "")).alignment = _ALIGN_R
+            ws.cell(ri, 2, sup.get("supplier_number", "")).alignment = _ALIGN_R
+            c = ws.cell(ri, 3, _fmt_num(sup.get("total_amount")))
+            c.number_format = _MONEY_FMT
+            c.alignment = _ALIGN_R
+            ri += 1
+
+
 # ---------------------------------------------------------------------------
 # PDF export
 # ---------------------------------------------------------------------------
@@ -458,7 +500,6 @@ def build_tikhnun_section_story(tikhnun: dict, section: str, multiplier: str = "
             style_init_hdr = PS("bd_init", fontName=font_bold, fontSize=9,
                                 textColor=rl_colors.white, backColor=rl_colors.HexColor("#0C237D"),
                                 alignment=2, leftPadding=4, rightPadding=4, topPadding=3, bottomPadding=3)
-            style_body = PS("bd_body", fontName=font_name, fontSize=8, alignment=2)
             story.append(Paragraph(rtl("פירוט ספקים שדווחו — לפי יוזמה"), style_bd_title))
             story.append(Spacer(1, 0.3*cm))
 
@@ -484,6 +525,49 @@ def build_tikhnun_section_story(tikhnun: dict, section: str, multiplier: str = "
                 story.append(bd_tbl)
                 story.append(Spacer(1, 0.25*cm))
 
+    elif section == "nihul":
+        story.append(Paragraph(rtl("ניהול ותפעול - פירוט ספקים"), style_title))
+        story.append(Spacer(1, 0.4*cm))
+        nihul_breakdown = tikhnun.get("nihul_breakdown", [])
+        if not nihul_breakdown:
+            style_msg = ParagraphStyle("tkh_nihul_empty", fontName=font_name, fontSize=10, alignment=1)
+            story.append(Paragraph(rtl("אין נתוני ניהול ותפעול לבדיקה זו"), style_msg))
+        else:
+            sup_headers = ["שם ספק", "מספר ספק", "סכום"]
+            sup_col_widths = [9*cm, 4*cm, 4*cm]
+            sup_table_data = [[rtl(h) for h in sup_headers]]
+            subhdr_rows = []
+            for item in nihul_breakdown:
+                subhdr_rows.append(len(sup_table_data))
+                sup_table_data.append([
+                    rtl(f"קוד {item['code']} — {item['initiative_name']}"),
+                    "",
+                    fmt_money(item["total_amount"]),
+                ])
+                for sup in item.get("suppliers", []):
+                    sup_table_data.append([
+                        rtl(sup.get("supplier_name", "")),
+                        rtl(str(sup.get("supplier_number", ""))),
+                        fmt_money(sup.get("total_amount")),
+                    ])
+            sup_tbl = Table(_rev(sup_table_data), colWidths=list(reversed(sup_col_widths)))
+            base_style = [
+                ("FONTNAME", (0, 0), (-1, -1), font_name), ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ("BACKGROUND", (0, 0), (-1, 0), HDR_COLOR), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), font_bold), ("ALIGN", (0, 0), (-1, -1), "RIGHT"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F5F7FA")]),
+                ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CCCCCC")),
+            ]
+            for r in subhdr_rows:
+                base_style += [
+                    ("BACKGROUND", (0, r), (-1, r), GRAY),
+                    ("FONTNAME", (0, r), (-1, r), font_bold),
+                    ("TEXTCOLOR", (0, r), (-1, r), colors.HexColor("#0f172a")),
+                ]
+            sup_tbl.setStyle(TableStyle(base_style))
+            story.append(sup_tbl)
+
     return story
 
 
@@ -504,7 +588,7 @@ def export_tikhnun_pdf(tikhnun: dict, section: str, multiplier: str = "03") -> b
     # Always prepend school info for non-sikar sections (sikar IS the school info)
     if section != "sikar":
         story.extend(build_school_info_story(tikhnun))
-        story.append(PageBreak() if section in ("kvua", "partial", "yozma") else __import__("reportlab.platypus", fromlist=["Spacer"]).Spacer(1, 0.3*__import__("reportlab.lib.units", fromlist=["cm"]).cm))
+        story.append(PageBreak() if section in ("kvua", "partial", "yozma", "nihul") else __import__("reportlab.platypus", fromlist=["Spacer"]).Spacer(1, 0.3*__import__("reportlab.lib.units", fromlist=["cm"]).cm))
 
     story.extend(build_tikhnun_section_story(tikhnun, section, multiplier))
     doc.build(story)

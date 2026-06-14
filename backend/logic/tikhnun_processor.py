@@ -103,6 +103,54 @@ def _plan_key_doch(r):
     return f"{b}-{d}"
 
 
+def _norm_quotes(s: str) -> str:
+    return str(s).replace("״", '"').replace("“", '"').replace("”", '"')
+
+
+def normalize_budget_name(raw: str) -> str:
+    raw = _norm_quotes(raw).strip()
+    if 'גפ"ן' in raw or "גפן" in raw.replace('"', ""):
+        return "גפן חירום" if "חירום" in raw else "גפן"
+    if "תנופה" in raw:
+        return "תנופה"
+    if "דוקאטי" in raw:
+        return "דוקאטי"
+    if 'פל"ג' in raw or "פלג" in raw:
+        return 'פל"ג'
+    return raw
+
+
+def _build_yozma_detail(yozma_codes, yozma_by_code, total_betikhnun, max_yozma, gamish_notar):
+    codes = list(yozma_codes.keys())
+    caps = {
+        codes[0]: max_yozma,
+        codes[1]: max_yozma * 0.5,
+        codes[2]: max_yozma * 0.15,
+        codes[3]: max_yozma * 0.1,
+    }
+    detail = []
+    for code, label in yozma_codes.items():
+        betikhnun = yozma_by_code.get(code, 0)
+        cap = caps[code]
+        diff = cap - betikhnun
+        hefresh_shanim = min(diff, gamish_notar) if diff >= 0 else diff
+        detail.append({
+            "label": label,
+            "code": code,
+            "cap": round(cap),
+            "betikhnun": round(betikhnun),
+            "hefresh": round(hefresh_shanim),
+        })
+    hefresh_total = round(max_yozma) - round(total_betikhnun)
+    return {
+        "max": round(max_yozma),
+        "betikhnun": round(total_betikhnun),
+        "hefresh": hefresh_total,
+        "is_negative": hefresh_total < 0,
+        "detail": detail,
+    }
+
+
 def load_tikhnun(filepath):
     """
     Load and parse a tikhnun budget planning file.
@@ -156,13 +204,23 @@ def _process_tikhnun(hakol_rows, perut_rows):
     ctrl = None
     machozi_I = 0
     for r in hakol_data:
-        aval = str(r[0]).strip().replace("״", '"').replace("“", '"').replace("”", '"') if r[0] else ""
+        aval = _norm_quotes(str(r[0]).strip()) if r[0] else ""
         fval = str(r[5]).strip() if r[5] else ""
         if ('גפ"ן' in aval or "גפן" in aval.replace('"', "")):
             if "כללי" in fval and ctrl is None:
                 ctrl = r
             if "מחוזי" in fval and "דיפרנציאלי" in fval:
                 machozi_I = _to_num(r[8])
+
+    if ctrl is None:
+        # No גפן ctrl row — fall back to first non-summary budget row with H > 0
+        for r in hakol_data:
+            aval = _norm_quotes(str(r[0]).strip()) if r[0] else ""
+            if "סה" in aval[:4]:
+                continue
+            if aval and _to_num(r[7]) > 0:
+                ctrl = r
+                break
 
     if ctrl is None:
         raise ValueError("Could not find control row (תקציב גפ\"ן + תקציב כללי)")
@@ -179,7 +237,7 @@ def _process_tikhnun(hakol_rows, perut_rows):
         gval = str(r[6]).strip() if r[6] else ""
         i_val = _to_num(r[8])
         l_val = _to_num(r[11])
-        budget_type = str(r[0]).strip().replace("״", '"') if r[0] else ""
+        budget_type = _norm_quotes(str(r[0]).strip()) if r[0] else ""
 
         cond1 = "קידום רווחת התלמיד" in fval and i_val > 0
         cond2 = bool(gval) and i_val > 0
@@ -230,44 +288,155 @@ def _process_tikhnun(hakol_rows, perut_rows):
     # Yozma codes for this stage
     yozma_codes = YOZMA_CODES.get(school_stage, YOZMA_CODES["תיכון"])
     yozma_by_code = defaultdict(float)
-    for r in unique_plans:
-        rcode = str(r[17]).strip() if r[17] else ""
-        if rcode in yozma_codes:
-            yozma_by_code[rcode] += _to_num(r[15])
+    _comp_seen: set = set()
+    for r in perut_rows[1:]:
+        rcode = str(r[17] or "").strip()
+        if rcode not in yozma_codes:
+            continue
+        _c13 = r[13] if len(r) > 13 else None
+        if _c13 is not None:
+            comp_key = (
+                str(r[9]  or "").strip(),  # J - מספר מענה
+                str(r[10] or "").strip(),  # K
+                str(r[11] or "").strip(),  # L
+                str(r[12] or "").strip(),  # M
+                _c13,                       # N - עלות למרכיב
+                rcode,                      # R - קוד דיווח
+            )
+        else:
+            comp_key = (tuple(str(x).strip() if x else "" for x in r[:10]), rcode)
+        if comp_key in _comp_seen:
+            continue
+        _comp_seen.add(comp_key)
+        yozma_by_code[rcode] += _to_num(_c13) if _c13 is not None else _to_num(r[15])
 
     total_yozma_betikhnun = sum(yozma_by_code.values())
 
-    def _build_yozma_detail(max_yozma):
-        caps = {
-            list(yozma_codes.keys())[0]: max_yozma,          # נלוות
-            list(yozma_codes.keys())[1]: max_yozma * 0.5,    # רכוש קבוע
-            list(yozma_codes.keys())[2]: max_yozma * 0.15,   # כיבוד
-            list(yozma_codes.keys())[3]: max_yozma * 0.1,    # תיקונים קלים
-        }
-        detail = []
-        for code, label in yozma_codes.items():
-            betikhnun = yozma_by_code.get(code, 0)
-            cap = caps[code]
-            diff = cap - betikhnun
-            hefresh_shanim = min(diff, gamish_notar) if diff >= 0 else diff
-            detail.append({
-                "label": label,
-                "code": code,
-                "cap": round(cap),
-                "betikhnun": round(betikhnun),
-                "hefresh": round(hefresh_shanim),
-            })
-        hefresh_total = round(max_yozma) - round(total_yozma_betikhnun)
-        return {
-            "max": round(max_yozma),
-            "betikhnun": round(total_yozma_betikhnun),
-            "hefresh": hefresh_total,
-            "is_negative": hefresh_total < 0,
-            "detail": detail,
-        }
+    yozma_03 = _build_yozma_detail(yozma_codes, dict(yozma_by_code), total_yozma_betikhnun, max_yozma_03, gamish_notar)
+    yozma_04 = _build_yozma_detail(yozma_codes, dict(yozma_by_code), total_yozma_betikhnun, max_yozma_04, gamish_notar)
 
-    yozma_03 = _build_yozma_detail(max_yozma_03)
-    yozma_04 = _build_yozma_detail(max_yozma_04)
+    # ── Multi-budget detection ────────────────────────────────────────────────
+    seen_budget_names: set = set()
+    _budgets_data: list = []
+    for r in hakol_data:
+        aval = _norm_quotes(str(r[0]).strip()) if r[0] else ""
+        if "סה" in aval[:4]:   # "סה"כ..." summary rows — skip
+            continue
+        H_b = _to_num(r[7])
+        if aval and H_b > 0 and aval not in seen_budget_names:
+            seen_budget_names.add(aval)
+            _budgets_data.append({
+                "raw_name": aval,
+                "norm_name": normalize_budget_name(aval),
+                "H": H_b,
+                "L": _to_num(r[11]),
+                "S": _to_num(r[18]),
+                "T": _fmt_pct(r[19]),
+                "machozi_I": 0,
+                "yozma_breakdown": [],
+                "nihul_breakdown": [],
+            })
+        elif aval in seen_budget_names:
+            break
+
+    # Deduplicate by normalized name — keep only first occurrence per norm_name.
+    # Two raw budget names can normalize to "גפן" (e.g. "גפ"ן הכללי" and "גפ"ן מחוזי");
+    # keeping both causes duplicate pills and mis-distributed breakdown items.
+    seen_nn: set = set()
+    deduped: list = []
+    for b in _budgets_data:
+        if b["norm_name"] not in seen_nn:
+            seen_nn.add(b["norm_name"])
+            deduped.append(b)
+    _budgets_data = deduped
+
+    # Normalized name of the control (main גפן) budget row — used for gamish_notar
+    ctrl_norm = normalize_budget_name(_norm_quotes(str(ctrl[0]).strip())) if ctrl[0] else ""
+
+    # The ctrl row ("כללי") is the authoritative source for the גפן budget's H/L/S/T.
+    # The first "גפן" row in hakol may be a combined summary row with a larger H.
+    # Override the גפן entry with ctrl values to keep per-budget max consistent with global.
+    for b in _budgets_data:
+        if b["norm_name"] == ctrl_norm:
+            b["H"] = H   # ctrl row's H (identical to global H used for max_yozma)
+            b["L"] = L
+            b["S"] = S
+            b["T"] = T
+            break
+
+    # machozi per budget (second pass — need full scan)
+    for r in hakol_data:
+        aval = _norm_quotes(str(r[0]).strip()) if r[0] else ""
+        fval = str(r[5]).strip() if r[5] else ""
+        if "מחוזי" in fval and "דיפרנציאלי" in fval and aval:
+            norm = normalize_budget_name(aval)
+            for b in _budgets_data:
+                if b["norm_name"] == norm:
+                    b["machozi_I"] += _to_num(r[8])
+
+    # rcode → budget mapping from פירוט המענים (first occurrence wins)
+    rcode_to_budget: dict = {}
+    for r in perut_rows[1:]:
+        braw = _norm_quotes(str(r[0]).strip()) if r[0] else ""
+        rcode = str(r[17]).strip() if r[17] else ""
+        if rcode and braw and rcode not in rcode_to_budget:
+            rcode_to_budget[rcode] = normalize_budget_name(braw)
+
+    # Per-budget yozma computation
+    for bdata in _budgets_data:
+        bname = bdata["norm_name"]
+        budget_perut = [
+            r for r in perut_rows[1:]
+            if normalize_budget_name(_norm_quotes(str(r[0] or "").strip())) == bname
+        ]
+        # Deduplicate
+        seen_b: dict = {}
+        for r in budget_perut:
+            key = tuple(str(x).strip() if x else "" for x in r[:10])
+            if key not in seen_b:
+                seen_b[key] = r
+        unique_b = list(seen_b.values())
+
+        plans_with_R_b = [r for r in unique_b if r[17] and str(r[17]).strip()]
+        sum_chayav_b = sum(_to_num(r[15]) for r in plans_with_R_b)
+
+        yb_code: dict = defaultdict(float)
+        _comp_seen_b: set = set()
+        for r in budget_perut:
+            rcode = str(r[17] or "").strip()
+            if rcode not in yozma_codes:
+                continue
+            _c13 = r[13] if len(r) > 13 else None
+            if _c13 is not None:
+                comp_key = (
+                    str(r[9]  or "").strip(),
+                    str(r[10] or "").strip(),
+                    str(r[11] or "").strip(),
+                    str(r[12] or "").strip(),
+                    _c13,
+                    rcode,
+                )
+            else:
+                comp_key = (tuple(str(x).strip() if x else "" for x in r[:10]), rcode)
+            if comp_key in _comp_seen_b:
+                continue
+            _comp_seen_b.add(comp_key)
+            yb_code[rcode] += _to_num(_c13) if _c13 is not None else _to_num(r[15])
+        total_yb = sum(yb_code.values())
+
+        # Main גפן budget uses the globally-computed gamish (which deducts kvua gaps).
+        # Other budgets have no kvua rows so H - L is the correct flexible amount.
+        gamish_b = gamish_notar if bdata["norm_name"] == ctrl_norm else bdata["H"] - bdata["L"]
+        max03_b = (bdata["H"] + bdata["machozi_I"]) * 0.3
+        max04_b = (bdata["H"] + bdata["machozi_I"]) * 0.4
+
+        bdata.update({
+            "sum_chayav": sum_chayav_b,
+            "plans_with_R_budget": plans_with_R_b,
+            "gamish_notar": gamish_b,
+            "yozma_03": _build_yozma_detail(yozma_codes, dict(yb_code), total_yb, max03_b, gamish_b),
+            "yozma_04": _build_yozma_detail(yozma_codes, dict(yb_code), total_yb, max04_b, gamish_b),
+        })
 
     return {
         "school_name": school_name,
@@ -289,6 +458,8 @@ def _process_tikhnun(hakol_rows, perut_rows):
         "total_yozma_betikhnun": total_yozma_betikhnun,
         "yozma_03": yozma_03,
         "yozma_04": yozma_04,
+        "rcode_to_budget": rcode_to_budget,
+        "_budgets_data": _budgets_data,
     }
 
 
@@ -434,6 +605,76 @@ def cross_reference_doch(tikhnun_data, doch_filepath):
     yozma_breakdown.sort(
         key=lambda x: (int(x["code"]) if x["code"].isdigit() else 0, x["plan_number"])
     )
+
+    # ── Nihul breakdown: code 104 (tikkon) or 67 (beinayim) ──────────────────
+    nihul_code = "104" if tikhnun_data.get("school_stage") == "תיכון" else "67"
+    nihul_sups: dict = defaultdict(list)
+    for r in doch_rows[1:]:
+        if str(r[0] or "").strip().startswith("מענה משרדי"):
+            continue
+        cd = str(r[1] or "").strip()
+        if cd != nihul_code:
+            continue
+        sup_raw = str(r[6] or "").strip()
+        sup_m = re.match(r"^\s*(\d+)\s*-\s*", sup_raw)
+        sup_num = sup_m.group(1) if sup_m else sup_raw
+        sup_name = re.sub(r"^\s*\d+\s*-\s*", "", sup_raw).strip()
+        try:
+            amount = int(round(float(str(r[11] or "0").replace(",", "").strip()))) if r[11] else 0
+        except Exception:
+            amount = 0
+        nihul_sups[sup_num].append({
+            "date": _fmt_date(r[5]),
+            "invoice": str(r[4] or "").strip(),
+            "description": str(r[10] or "").strip(),
+            "amount": amount,
+            "supplier_name": sup_name,
+        })
+
+    nihul_suppliers = []
+    nihul_total = 0.0
+    for sup_num, txns in nihul_sups.items():
+        sup_total = sum(t["amount"] for t in txns)
+        nihul_total += sup_total
+        nihul_suppliers.append({
+            "supplier_number": sup_num,
+            "supplier_name": txns[0]["supplier_name"],
+            "total_amount": int(round(sup_total)),
+            "transactions": [
+                {"date": t["date"], "invoice": t["invoice"],
+                 "description": t["description"], "amount": t["amount"]}
+                for t in txns
+            ],
+        })
+    nihul_suppliers.sort(key=lambda x: -x["total_amount"])
+    nihul_breakdown = [{
+        "code": nihul_code,
+        "initiative_name": "ניהול ותפעול",
+        "plan_number": "",
+        "total_amount": int(round(nihul_total)),
+        "suppliers": nihul_suppliers,
+    }] if nihul_suppliers else []
+    # ─────────────────────────────────────────────────────────────────────────
+
+    # ── Distribute yozma_breakdown and nihul_breakdown per budget ─────────────
+    _budgets_data = tikhnun_data.get("_budgets_data", [])
+    rcode_to_budget = tikhnun_data.get("rcode_to_budget", {})
+    if _budgets_data:
+        default_bname = _budgets_data[0]["norm_name"]
+        bname_to_idx = {b["norm_name"]: i for i, b in enumerate(_budgets_data)}
+
+        for item in yozma_breakdown:
+            bname = rcode_to_budget.get(item["code"], default_bname)
+            idx = bname_to_idx.get(bname, 0)
+            _budgets_data[idx]["yozma_breakdown"].append(item)
+
+        # Mark the nihul-owning budget regardless of whether invoices exist.
+        # This lets the frontend distinguish "no planning" from "planned but no invoices".
+        nihul_owner = rcode_to_budget.get(nihul_code, default_bname)
+        owner_idx = bname_to_idx.get(nihul_owner, 0)
+        _budgets_data[owner_idx]["nihul_planned"] = True
+        if nihul_breakdown:
+            _budgets_data[owner_idx]["nihul_breakdown"] = nihul_breakdown
     # ─────────────────────────────────────────────────────────────────────────
 
     tikhnun_data.update({
@@ -443,6 +684,7 @@ def cross_reference_doch(tikhnun_data, doch_filepath):
         "partial_rows": partial_rows,
         "sum_hefresh_partial": sum_hefresh_partial,
         "yozma_breakdown": yozma_breakdown,
+        "nihul_breakdown": nihul_breakdown,
     })
     return tikhnun_data
 
@@ -466,6 +708,27 @@ def build_tikhnun_result(tikhnun_data):
         "pct_tanuz": tikhnun_data.get("pct_tanuz"),
     }
 
+    # Build per-budget array
+    budgets_out = []
+    for b in tikhnun_data.get("_budgets_data", []):
+        budgets_out.append({
+            "name": b["norm_name"],
+            "raw_name": b["raw_name"],
+            "overview": {
+                "budget": b["H"],
+                "planned": b["L"],
+                "sum_divuach": b["S"],
+                "pct_divuach": b["T"],
+                "flexible_remaining": b.get("gamish_notar", 0),
+                "sum_chayav": b.get("sum_chayav", 0),
+            },
+            "yozma_03": b.get("yozma_03", {}),
+            "yozma_04": b.get("yozma_04", {}),
+            "yozma_breakdown": b.get("yozma_breakdown", []),
+            "nihul_breakdown": b.get("nihul_breakdown", []),
+            "nihul_planned": b.get("nihul_planned", False),
+        })
+
     return {
         "school_name": tikhnun_data["school_name"],
         "school_code": tikhnun_data["school_code"],
@@ -479,7 +742,11 @@ def build_tikhnun_result(tikhnun_data):
         "partial_rows": tikhnun_data.get("partial_rows", []),
         "partial_has_issues": partial_has_issues,
         "sum_hefresh_partial": tikhnun_data.get("sum_hefresh_partial", 0),
+        # top-level yozma/nihul kept for backward compat (dialog, etc.)
         "yozma_03": tikhnun_data["yozma_03"],
         "yozma_04": tikhnun_data["yozma_04"],
         "yozma_breakdown": tikhnun_data.get("yozma_breakdown", []),
+        "nihul_breakdown": tikhnun_data.get("nihul_breakdown", []),
+        # per-budget array
+        "budgets": budgets_out,
     }

@@ -82,7 +82,7 @@ _GEFEN_REJECTED_COL_MAP = [
 ]
 
 # Columns to strip before writing Excel (internal/computed)
-_STRIP_COLS = {"ichud", "supplier_number", "amount", "report_code"}
+_STRIP_COLS = {"ichud", "supplier_number", "amount", "report_code", "_budget"}
 
 # Known data columns in a "דיווח ביצוע" sheet (used for no-PDF completeness check)
 _GEFEN_DATA_COLS = [
@@ -346,7 +346,7 @@ def download_combined_excel(
 
 def _process(run_id: str, paths: list[Path]) -> None:
     try:
-        gefen_paths, finance_path, finance_type, tikhnun_paths = _classify_files(paths)
+        gefen_paths, finance_paths, finance_type, tikhnun_paths = _classify_files(paths)
 
         # ── Tikhnun-only run (no gefen doch) ─────────────────────────────────
         if not gefen_paths and tikhnun_paths:
@@ -384,12 +384,15 @@ def _process(run_id: str, paths: list[Path]) -> None:
         tikhnun_result        = None
         tikhnun_tikkon_result  = None
         tikhnun_beinayim_result = None
+        # Raw tikhnun_data kept for rcode_to_budget (multi-budget tagging)
+        _tikhnun_data_raw: dict | None = None
 
         if len(tikhnun_paths) == 1:
             try:
                 tikhnun_data = load_tikhnun(str(tikhnun_paths[0]))
                 tikhnun_data["filename"] = tikhnun_paths[0].name
                 tikhnun_data = cross_reference_doch(tikhnun_data, str(gefen_paths[0]))
+                _tikhnun_data_raw = tikhnun_data
                 tikhnun_result = build_tikhnun_result(tikhnun_data)
             except Exception as exc:
                 logger.error("Tikhnun processing error for run %s: %s", run_id, exc)
@@ -412,12 +415,19 @@ def _process(run_id: str, paths: list[Path]) -> None:
                         beinayim_data = cross_reference_doch(beinayim_data, str(gpath))
                     tikhnun_beinayim_result = build_tikhnun_result(beinayim_data)
                 tikhnun_result = tikhnun_tikkon_result or tikhnun_beinayim_result
+                # Merge rcode_to_budget from both divisions for tagging
+                _merged_rcode = {}
+                for td in (tikkon_data, beinayim_data):
+                    if td:
+                        _merged_rcode.update(td.get("rcode_to_budget", {}))
+                if _merged_rcode:
+                    _tikhnun_data_raw = {"rcode_to_budget": _merged_rcode, "_budgets_data": (tikkon_data or beinayim_data).get("_budgets_data", [])}
             except Exception as exc:
                 logger.error("Tikhnun processing error for run %s: %s", run_id, exc)
                 tikhnun_result = {"error": str(exc)}
 
         # Gefen-only run (no finance) — skip reconciliation
-        if finance_path is None:
+        if not finance_paths:
             export(
                 _for_excel(df_gefen),
                 None,
@@ -452,8 +462,22 @@ def _process(run_id: str, paths: list[Path]) -> None:
 
         # Load raw finance df — kesafim2000 still has English column names here
         # so that reconciler._filter_by_division can access "report_code"
-        df_finance_raw, finance_label, finance_file_stats = _load_finance_raw(finance_path, finance_type)
+        df_finance_raw, finance_label, finance_file_stats = _load_finance_raw(finance_paths, finance_type)
         in_finance_not_gefen, in_gefen_not_finance, division, finance_rows_checked = reconcile(df_gefen, df_finance_raw)
+
+        # Tag rows with budget name (before column rename, while report_code is intact)
+        rcode_to_budget_map: dict = _tikhnun_data_raw.get("rcode_to_budget", {}) if _tikhnun_data_raw else {}
+        budgets_list: list = _tikhnun_data_raw.get("_budgets_data", []) if _tikhnun_data_raw else []
+        budget_names: list[str] = [b["norm_name"] for b in budgets_list]
+        default_budget: str | None = budget_names[0] if budget_names else None
+
+        if default_budget and len(budget_names) > 1:
+            def _tag_budget(df: pd.DataFrame) -> pd.DataFrame:
+                df = df.copy()
+                df["_budget"] = df["report_code"].astype(str).map(rcode_to_budget_map).fillna(default_budget)
+                return df
+            in_finance_not_gefen = _tag_budget(in_finance_not_gefen)
+            in_gefen_not_finance  = _tag_budget(in_gefen_not_finance)
 
         # Rename report_code → קוד דיווח for all finance types after reconciliation.
         # Kesafim also renames its other English columns to Hebrew display names.
@@ -483,6 +507,18 @@ def _process(run_id: str, paths: list[Path]) -> None:
         else:
             finance_col_map = _PAYSCOOL_COL_MAP
 
+        # Build per-budget comparison results (multi-budget only)
+        per_combo_results: dict = {}
+        if default_budget and len(budget_names) > 1 and "_budget" in in_finance_not_gefen.columns:
+            for bname in budget_names:
+                fin_b = in_finance_not_gefen[in_finance_not_gefen["_budget"] == bname].drop(columns=["_budget"])
+                gef_b = in_gefen_not_finance[in_gefen_not_finance["_budget"] == bname].drop(columns=["_budget"])
+                per_combo_results[bname] = {
+                    "budget": bname,
+                    "in_finance_not_gefen": _build_display_records(fin_b, finance_col_map),
+                    "in_gefen_not_finance": _build_display_records(gef_b, _GEFEN_COL_MAP),
+                }
+
         runs[run_id] = {
             "status": "done",
             "gefen_only": False,
@@ -490,6 +526,7 @@ def _process(run_id: str, paths: list[Path]) -> None:
             "tikhnun": tikhnun_result,
             "tikhnun_tikkon": tikhnun_tikkon_result,
             "tikhnun_beinayim": tikhnun_beinayim_result,
+            "per_combo_results": per_combo_results,
             "summary": {
                 "gefen_rows": len(df_gefen),
                 "finance_rows_total": len(df_finance_raw),
@@ -507,8 +544,8 @@ def _process(run_id: str, paths: list[Path]) -> None:
                     "rows_checked": finance_rows_checked,
                 },
             },
-            "rows_finance_not_gefen": _build_display_records(in_finance_not_gefen, finance_col_map),
-            "rows_gefen_not_finance": _build_display_records(in_gefen_not_finance, _GEFEN_COL_MAP),
+            "rows_finance_not_gefen": _build_display_records(in_finance_not_gefen.drop(columns=["_budget"], errors="ignore"), finance_col_map),
+            "rows_gefen_not_finance": _build_display_records(in_gefen_not_finance.drop(columns=["_budget"], errors="ignore"), _GEFEN_COL_MAP),
             "rows_gefen_rejected": _build_display_records(in_gefen_rejected, _GEFEN_REJECTED_COL_MAP),
             "rows_gefen_no_pdf": _build_display_records(in_gefen_no_pdf, _GEFEN_COL_MAP),
             "file_path": excel_path,
@@ -575,9 +612,9 @@ def _extract_gefen_only_results(df_gefen: pd.DataFrame) -> tuple[pd.DataFrame, p
     return in_gefen_rejected, in_gefen_no_pdf
 
 
-def _classify_files(paths: list[Path]) -> tuple[list[Path], Path | None, str | None, list[Path]]:
+def _classify_files(paths: list[Path]) -> tuple[list[Path], list[Path], str | None, list[Path]]:
     gefen: list[Path] = []
-    finance_path: Path | None = None
+    finance_paths: list[Path] = []
     finance_type: str | None = None
     tikhnun_paths: list[Path] = []
 
@@ -586,9 +623,13 @@ def _classify_files(paths: list[Path]) -> tuple[list[Path], Path | None, str | N
         if ftype == "gefen":
             gefen.append(p)
         elif ftype in ("kesafim2000", "payscool", "schoolcash"):
-            if finance_path is not None:
-                raise ValueError("התקבלו שני קבצי כספים. אנא העלה קובץ כספים אחד בלבד.")
-            finance_path = p
+            if finance_type is not None and ftype != finance_type:
+                raise ValueError(
+                    "התקבלו קבצי כספים מסוגים שונים. אנא העלה קבצי כספים מאותו סוג בלבד."
+                )
+            if len(finance_paths) >= 2:
+                raise ValueError("התקבלו יותר משני קבצי כספים. אנא העלה עד שני קבצי כספים.")
+            finance_paths.append(p)
             finance_type = ftype
         elif ftype == "tikhnun":
             tikhnun_paths.append(p)
@@ -602,16 +643,20 @@ def _classify_files(paths: list[Path]) -> tuple[list[Path], Path | None, str | N
 
     # tikhnun only (with or without finance) — treat as tikhnun-only
     if tikhnun_paths and not gefen:
-        return [], None, None, tikhnun_paths
+        return [], [], None, tikhnun_paths
 
-    if not gefen and finance_path is not None:
+    if not gefen and finance_paths:
         raise ValueError("לא ניתן לבצע את הבדיקה עם קובץ מתוכנת הכספים בלבד.")
     if not gefen:
         raise ValueError("לא קיבלתי קבצים מזוהים.")
     if len(gefen) > 2:
         raise ValueError("התקבלו יותר משני קבצי גפן. אנא העלה עד שני קבצי גפן.")
+    if gefen and not tikhnun_paths:
+        raise ValueError(
+            "לביצוע הבדיקה יש להעלות גם קובץ תכנון תקציבי (תקציב_המוסד_נכון_להיום)."
+        )
 
-    return gefen, finance_path, finance_type, tikhnun_paths
+    return gefen, finance_paths, finance_type, tikhnun_paths
 
 
 def _assign_tikhnun_pair(td0: dict, td1: dict) -> tuple[dict | None, dict | None]:
@@ -689,19 +734,52 @@ def _load_gefen_files(paths: list[Path]) -> tuple[pd.DataFrame, list[dict], dict
     return merged, per_file_stats, merge_note
 
 
-def _load_finance_raw(path: Path, ftype: str) -> tuple[pd.DataFrame, str, dict]:
-    """Load finance file without renaming columns — reconciler needs 'report_code' intact."""
-    if ftype == "kesafim2000":
-        df = load_kesafim(str(path))
-        stats = {"filename": path.name, "software": "כספים2000", "cancelled_rows": None}
-        return df, "כספים", stats
-    if ftype == "schoolcash":
-        df = load_schoolcash(str(path))
-        stats = {"filename": path.name, "software": "סקולקאש", "cancelled_rows": None}
-        return df, "סקולקאש", stats
-    df, cancelled = load_payscool(str(path))
-    stats = {"filename": path.name, "software": "פייסקול", "cancelled_rows": cancelled}
-    return df, "פייסקול", stats
+def _load_finance_raw(paths: list[Path], ftype: str) -> tuple[pd.DataFrame, str, dict]:
+    """Load finance file(s) without renaming columns — reconciler needs 'report_code' intact.
+
+    Accepts one or two paths of the same type. When two files are given they are
+    merged with deduplication on the ichud key (same strategy as Gefen merging).
+    """
+    _label_map = {"kesafim2000": ("כספים", "כספים2000"), "schoolcash": ("סקולקאש", "סקולקאש"), "payscool": ("פייסקול", "פייסקול")}
+    label, software = _label_map[ftype]
+
+    def _load_one(p: Path) -> tuple[pd.DataFrame, int | None]:
+        if ftype == "kesafim2000":
+            return load_kesafim(str(p)), None
+        if ftype == "schoolcash":
+            return load_schoolcash(str(p)), None
+        df, cancelled = load_payscool(str(p))
+        return df, cancelled
+
+    df0, cancelled0 = _load_one(paths[0])
+
+    if len(paths) == 1:
+        stats = {"filename": paths[0].name, "software": software, "cancelled_rows": cancelled0}
+        return df0, label, stats
+
+    df1, cancelled1 = _load_one(paths[1])
+    set0, set1 = set(df0["ichud"]), set(df1["ichud"])
+    if set0 >= set1:
+        merged = df0
+    elif set1 >= set0:
+        merged = df1
+    else:
+        merged = (
+            pd.concat([df0, df1], ignore_index=True)
+            .drop_duplicates(subset=["ichud"])
+            .reset_index(drop=True)
+        )
+
+    cancelled_total = None
+    if cancelled0 is not None and cancelled1 is not None:
+        cancelled_total = cancelled0 + cancelled1
+
+    stats = {
+        "filename": f"{paths[0].name} + {paths[1].name}",
+        "software": software,
+        "cancelled_rows": cancelled_total,
+    }
+    return merged, label, stats
 
 
 def _for_excel(df: pd.DataFrame) -> pd.DataFrame:
